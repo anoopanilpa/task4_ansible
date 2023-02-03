@@ -1,0 +1,124 @@
+---
+  - name : Task 4 Ansible Playbooks
+    hosts : all
+    become : true
+    
+    vars :
+      cpu : "{{ ansible_facts['processor'][2] }}"
+      dist : "{{ ansible_facts['distribution'] }}"
+      ram : "{{ ansible_facts['memtotal_mb'] }}"
+      dist_version : "{{ ansible_facts['distribution_version'] }}"
+      ip : "{{ ansible_facts['default_ipv4']['address'] }}"
+      hostname : "{{ ansible_facts['hostname'] }}"
+      host_all :
+        - "{{ ansible_hostname }}"
+        - "127.0.0.1"
+        - "::1"
+        - "localhost"
+
+    vars_files : 
+      - variables.yaml
+      #- my.cnf
+
+    tasks : 
+     -  name : install apache ubuntu
+        apt :
+          name : apache2
+          state : present
+          update_cache: yes
+        when : ansible_facts['distribution'] == "Ubuntu"  or ansible_facts['os_family'] == "Debian"
+
+     -  name : install apache centOS
+        yum :
+          name : httpd
+          state : present
+        when: ansible_facts['distribution'] == "CentOS"
+
+     -  name : Copy conf file to ubuntu
+        copy : 
+          src : vhost.config
+          dest: /etc/apache2/sites-enabled/000-default.conf
+          mode: 0644
+        notify: Restarting apache2
+        when: ansible_facts['distribution'] == "Ubuntu"  or ansible_facts['os_family'] == "Debian"
+ 
+     -  name : copy conf file to centOS
+        copy :
+          src : vhost.config
+          dest: /etc/apache2/sites-enabled/000-default.conf
+          mode : 0644
+        notify: Restarting apache2
+        when: ansible_facts['distribution'] == "CentOS"
+
+     -  name : copy index file
+        ansible.builtin.template:
+          src : template/index.html.j2
+          dest: /var/www/html/index.html
+          mode: 0664
+
+     -  name : Installing mysql
+        apt : 
+          name : "{{ item }}"
+          state : present
+          update_cache: yes
+        loop :
+          - mysql-server
+          - mysql-client
+          - python3-pip
+      
+     -  name: Install python3-PyMySQL library
+        pip : 
+          name: pymysql
+          state: present
+
+     -  name : starting Mysql service
+        service : 
+          name : mysql
+          state : started
+      
+     -  name : mysql root passsword 
+        ansible.builtin.mysql_user:
+          login_host: 'localhost'
+          login_user: 'root'
+          check_implicit_admin : true
+          login_password: ''
+          host : "{{ host_all }}"
+          name: 'root'
+          password: '{{ mysql_pass }}'
+          priv: '*.*:ALL,GRANT'
+          state: present
+          
+
+     -  name : creating user
+        user :
+          name : "{{ user_name }}"
+      
+     -  name : copy my_cnf
+        copy :
+          src  : my.cnf
+          dest : /home/{{ user_name }}/.my.cnf
+          owner: "{{ user_name }}"
+          decrypt: yes
+          mode : 0644
+
+     -  name : "Add repository for PHP 7.4"
+        ansible.builtin.apt_repository:
+          repo="ppa:ondrej/php"
+          update_cache=yes
+
+     -  name : Installing php 
+        apt : 
+          name : php7.4
+          state: present
+          update_cache: yes
+      
+     -  name : installing php modules
+        apt :
+          pkg : "{{ item }}"
+        loop: "{{ packages }}"
+
+    handlers : 
+      - name : Restarting apache2
+        service :
+          name : apache2
+          state: restarted
